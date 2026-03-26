@@ -737,6 +737,65 @@
     transform: translateX(-50%) translateY(0);
   }
 
+
+  /* Autocomplete */
+  .search-section { position: relative; }
+  .autocomplete-dropdown {
+    position: absolute;
+    top: calc(100% - 10px);
+    left: 0; right: 0;
+    background: #16161e;
+    border: 1px solid var(--green);
+    border-radius: 8px;
+    z-index: 200;
+    max-height: 340px;
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+    display: none;
+  }
+  .autocomplete-dropdown.open { display: block; }
+  .autocomplete-dropdown::-webkit-scrollbar { width: 4px; }
+  .autocomplete-dropdown::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .autocomplete-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-bottom: 1px solid var(--border);
+  }
+  .autocomplete-item:last-child { border-bottom: none; }
+  .autocomplete-item:hover, .autocomplete-item.highlighted { background: var(--surface2); }
+  .autocomplete-art {
+    width: 42px; height: 42px;
+    border-radius: 4px;
+    background: var(--surface2);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .autocomplete-art img { width: 100%; height: 100%; object-fit: cover; }
+  .autocomplete-meta { flex: 1; min-width: 0; }
+  .autocomplete-name {
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+  }
+  .autocomplete-artist {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .autocomplete-load-btns { display: flex; gap: 4px; flex-shrink: 0; }
+
   /* Spinning vinyl animation */
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   .track-art.playing img { animation: spin 3s linear infinite; border-radius: 50%; }
@@ -847,10 +906,9 @@
 
       <div class="search-section">
         <div class="search-bar">
-          <input class="search-input" id="search-a" placeholder="Search Spotify…" onkeydown="if(event.key==='Enter') searchTracks('a')" />
-          <button class="btn-search" onclick="searchTracks('a')">FIND</button>
+          <input class="search-input" id="search-a" placeholder="Search Spotify…" oninput="handleSearchInput('a')" onkeydown="handleSearchKey(event,'a')" autocomplete="off" />
+          <div class="autocomplete-dropdown" id="dropdown-a"></div>
         </div>
-        <div class="results-list" id="results-a"></div>
       </div>
     </div>
 
@@ -990,10 +1048,9 @@
 
       <div class="search-section">
         <div class="search-bar">
-          <input class="search-input" id="search-b" placeholder="Search Spotify…" onkeydown="if(event.key==='Enter') searchTracks('b')" />
-          <button class="btn-search" onclick="searchTracks('b')">FIND</button>
+          <input class="search-input" id="search-b" placeholder="Search Spotify…" oninput="handleSearchInput('b')" onkeydown="handleSearchKey(event,'b')" autocomplete="off" />
+          <div class="autocomplete-dropdown" id="dropdown-b"></div>
         </div>
-        <div class="results-list" id="results-b"></div>
       </div>
     </div>
 
@@ -1218,65 +1275,78 @@ async function fetchDevices() {
 }
 
 // ══════════════════════════════════════════
-//  SEARCH
+//  SEARCH — AUTOCOMPLETE
 // ══════════════════════════════════════════
-async function searchTracks(deck) {
+const searchTimers = {};
+
+function handleSearchInput(deck) {
+  clearTimeout(searchTimers[deck]);
   const q = document.getElementById(`search-${deck}`).value.trim();
-  if (!q) return;
-  const list = document.getElementById(`results-${deck}`);
-  list.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px;" class="loading">SEARCHING…</div>';
+  const dropdown = document.getElementById(`dropdown-${deck}`);
+  if (!q) { dropdown.classList.remove('open'); dropdown.innerHTML = ''; return; }
+  dropdown.innerHTML = '<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--muted);" class="loading">SEARCHING…</div>';
+  dropdown.classList.add('open');
+  searchTimers[deck] = setTimeout(() => fetchAutocomplete(deck, q), 300);
+}
 
+function handleSearchKey(e, deck) {
+  const dropdown = document.getElementById(`dropdown-${deck}`);
+  const items = dropdown.querySelectorAll('.autocomplete-item');
+  const highlighted = dropdown.querySelector('.highlighted');
+  let idx = Array.from(items).indexOf(highlighted);
+  if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(idx + 1, items.length - 1); items.forEach(i => i.classList.remove('highlighted')); if (items[idx]) items[idx].classList.add('highlighted'); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(idx - 1, 0); items.forEach(i => i.classList.remove('highlighted')); if (items[idx]) items[idx].classList.add('highlighted'); }
+  else if (e.key === 'Escape') { dropdown.classList.remove('open'); }
+}
+
+async function fetchAutocomplete(deck, q) {
+  const dropdown = document.getElementById(`dropdown-${deck}`);
   try {
-    const data = await spotifyAPI('GET', `/search?q=${encodeURIComponent(q)}&type=track&limit=12`);
+    const data = await spotifyAPI('GET', `/search?q=${encodeURIComponent(q)}&type=track&limit=8`);
     const tracks = data?.tracks?.items || [];
-    list.innerHTML = '';
-
+    dropdown.innerHTML = '';
     if (!tracks.length) {
-      list.innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:8px;">NO RESULTS</div>';
+      dropdown.innerHTML = '<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--muted);">NO RESULTS</div>';
       return;
     }
-
     tracks.forEach(track => {
       const img = track.album?.images?.[2]?.url || track.album?.images?.[0]?.url;
-      const el = document.createElement('div');
-      el.className = 'result-item';
-      el.innerHTML = `
-        <div class="result-art">${img ? `<img src="${img}" loading="lazy" />` : '♪'}</div>
-        <div class="result-meta">
-          <div class="result-name">${track.name}</div>
-          <div class="result-artist">${track.artists.map(a => a.name).join(', ')}</div>
+      const artist = track.artists.map(a => a.name).join(', ');
+      const item = document.createElement('div');
+      item.className = 'autocomplete-item';
+      item.innerHTML = `
+        <div class="autocomplete-art">${img ? `<img src="${img}" loading="lazy" />` : '♪'}</div>
+        <div class="autocomplete-meta">
+          <div class="autocomplete-name">${track.name}</div>
+          <div class="autocomplete-artist">${artist}</div>
         </div>
-        <div class="result-load-btns">
-          <button class="btn-load-deck btn-load-a" onclick="loadTrack('a', '${track.uri}', this)">A</button>
-          <button class="btn-load-deck btn-load-b" onclick="loadTrack('b', '${track.uri}', this)">B</button>
+        <div class="autocomplete-load-btns">
+          <button class="btn-load-deck btn-load-a">A</button>
+          <button class="btn-load-deck btn-load-b">B</button>
         </div>
       `;
-      // Store track data
-      el.dataset.uri = track.uri;
-      el.dataset.name = track.name;
-      el.dataset.artist = track.artists.map(a => a.name).join(', ');
-      el.dataset.art = img || '';
-      el.dataset.duration = track.duration_ms;
-      list.appendChild(el);
+      const trackData = { uri: track.uri, name: track.name, artist, art: img || '', duration: track.duration_ms };
+      item.querySelector('.btn-load-a').onclick = (e) => { e.stopPropagation(); loadTrackFromData('a', trackData); dropdown.classList.remove('open'); document.getElementById(`search-${deck}`).value = track.name; };
+      item.querySelector('.btn-load-b').onclick = (e) => { e.stopPropagation(); loadTrackFromData('b', trackData); dropdown.classList.remove('open'); document.getElementById(`search-${deck}`).value = track.name; };
+      item.onclick = () => { loadTrackFromData(deck, trackData); dropdown.classList.remove('open'); document.getElementById(`search-${deck}`).value = track.name; };
+      dropdown.appendChild(item);
     });
-
-    // Re-wire load buttons with full data
-    list.querySelectorAll('[data-uri]').forEach(item => {
-      item.querySelectorAll('.btn-load-deck').forEach(btn => {
-        const targetDeck = btn.classList.contains('btn-load-a') ? 'a' : 'b';
-        btn.onclick = () => loadTrackFromData(targetDeck, {
-          uri: item.dataset.uri,
-          name: item.dataset.name,
-          artist: item.dataset.artist,
-          art: item.dataset.art,
-          duration: parseInt(item.dataset.duration)
-        });
-      });
-    });
+    dropdown.classList.add('open');
   } catch (e) {
-    list.innerHTML = `<div style="font-family:var(--mono);font-size:11px;color:var(--red);padding:8px;">ERROR: ${e.message}</div>`;
+    dropdown.innerHTML = `<div style="padding:12px 14px;font-family:var(--mono);font-size:11px;color:var(--red);">ERROR: ${e.message}</div>`;
   }
 }
+
+// Close dropdowns when clicking outside
+document.addEventListener('click', (e) => {
+  ['a','b'].forEach(deck => {
+    const input = document.getElementById(`search-${deck}`);
+    const dropdown = document.getElementById(`dropdown-${deck}`);
+    if (dropdown && input && !input.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.classList.remove('open');
+    }
+  });
+});
 
 function loadTrackFromData(deck, trackData) {
   STATE.decks[deck].track = trackData;
